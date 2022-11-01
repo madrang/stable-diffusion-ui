@@ -1,5 +1,10 @@
 import json
 
+class SymbolClass(type): # Print nicely formatted Symbol names.
+    def __repr__(self): return self.__qualname__
+    def __str__(self): return self.__name__
+class Symbol(metaclass=SymbolClass): pass
+
 class Request:
     session_id: str = "session"
     prompt: str = ""

@@ -1,10 +1,7 @@
 "use strict" // Opt in to a restricted variant of JavaScript
-const HEALTH_PING_INTERVAL = 5 // seconds
 const MAX_INIT_IMAGE_DIMENSION = 768
 
 const IMAGE_REGEX = new RegExp('data:image/[A-Za-z]+;base64')
-
-let sessionId = Date.now()
 
 let promptField = document.querySelector('#prompt')
 let promptsFromFileSelector = document.querySelector('#prompt_from_file')
@@ -64,8 +61,6 @@ let maskSetting = document.querySelector('#enable_mask')
 
 let imagePreview = document.querySelector("#preview")
 
-// let previewPrompt = document.querySelector('#preview-prompt')
-
 let showConfigToggle = document.querySelector('#configToggleBtn')
 // let configBox = document.querySelector('#config')
 // let outputMsg = document.querySelector('#outputMsg')
@@ -75,7 +70,6 @@ let soundToggle = document.querySelector('#sound_toggle')
 let serverStatusColor = document.querySelector('#server-status-color')
 let serverStatusMsg = document.querySelector('#server-status-msg')
 
-
 document.querySelector('.drawing-board-control-navigation-back').innerHTML = '<i class="fa-solid fa-rotate-left"></i>'
 document.querySelector('.drawing-board-control-navigation-forward').innerHTML = '<i class="fa-solid fa-rotate-right"></i>'
 
@@ -83,13 +77,6 @@ let maskResetButton = document.querySelector('.drawing-board-control-navigation-
 maskResetButton.innerHTML = 'Clear'
 maskResetButton.style.fontWeight = 'normal'
 maskResetButton.style.fontSize = '10pt'
-
-let serverState = {'status': 'Offline', 'time': Date.now()}
-let lastPromptUsed = ''
-let bellPending = false
-
-let taskQueue = []
-let currentTask = null
 
 function getLocalStorageBoolItem(key, fallback) {
     let item = localStorage.getItem(key)
@@ -142,19 +129,6 @@ function setServerStatus(msgType, msg) {
             break
     }
 }
-function isServerAvailable() {
-    if (typeof serverState !== 'object') {
-        return false
-    }
-    switch (serverState.status) {
-        case 'LoadingModel':
-        case 'Rendering':
-        case 'Online':
-            return true
-        default:
-            return false
-    }
-}
 
 function logMsg(msg, level, outputMsg) {
     if (outputMsg.hasChildNodes()) {
@@ -185,45 +159,6 @@ function playSound() {
         promise.then(_ => {}).catch(error => {
             console.warn("browser blocked autoplay")
         })
-    }
-}
-
-async function healthCheck() {
-    try {
-        let res = undefined
-        if (sessionId) {
-            res = await fetch('/ping?session_id=' + sessionId)
-        } else {
-            res = await fetch('/ping')
-        }
-        serverState = await res.json()
-        if (typeof serverState !== 'object' || typeof serverState.status !== 'string') {
-            serverState = {'status': 'Offline', 'time': Date.now()}
-            setServerStatus('error', 'offline')
-            return
-        }
-        // Set status
-        switch(serverState.status) {
-            case 'Init':
-                // Wait for init to complete before updating status.
-                break
-            case 'Online':
-                setServerStatus('online', 'ready')
-                break
-            case 'LoadingModel':
-                setServerStatus('busy', 'loading..')
-                break
-            case 'Rendering':
-                setServerStatus('busy', 'rendering..')
-                break
-            default: // Unavailable
-                setServerStatus('error', serverState.status.toLowerCase())
-                break
-        }
-        serverState.time = Date.now()
-    } catch (e) {
-        serverState = {'status': 'Offline', 'time': Date.now()}
-        setServerStatus('error', 'offline')
     }
 }
 
@@ -406,192 +341,7 @@ async function doMakeImage(task) {
     if (task.stopped) {
         return
     }
-
-    const RETRY_DELAY_IF_BUFFER_IS_EMPTY = 1000 // ms
-    const RETRY_DELAY_IF_SERVER_IS_BUSY = 30 * 1000 // ms, status_code 503, already a task running
-    const TASK_START_DELAY_ON_SERVER = 1500 // ms
-    const SERVER_STATE_VALIDITY_DURATION = 10 * 1000 // ms
-
-    const reqBody = task.reqBody
-    const batchCount = task.batchCount
-    const outputContainer = document.createElement('div')
-
-    outputContainer.className = 'img-batch'
-    task.outputContainer.insertBefore(outputContainer, task.outputContainer.firstChild)
-
-    const outputMsg = task['outputMsg']
-    const previewPrompt = task['previewPrompt']
-    const progressBar = task['progressBar']
-    const progressBarInner = progressBar.querySelector("div")
-
-    let res = undefined
     try {
-        const lastTask = serverState.task
-        let renderRequest = undefined
-        do {
-            res = await fetch('/render', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(reqBody)
-            })
-            renderRequest = await res.json()
-            // status_code 503, already a task running.
-        } while (res.status === 503 && await asyncDelay(RETRY_DELAY_IF_SERVER_IS_BUSY))
-
-        if (typeof renderRequest?.stream !== 'string') {
-            console.log('Endpoint response: ', renderRequest)
-            throw new Error(renderRequest?.detail || 'Endpoint response does not contains a response stream url.')
-        }
-
-        task['taskStatusLabel'].innerText = "Waiting"
-        task['taskStatusLabel'].classList.add('waitingTaskLabel')
-        task['taskStatusLabel'].classList.remove('activeTaskLabel')
-
-        do { // Wait for server status to update.
-            await asyncDelay(250)
-            if (!isServerAvailable()) {
-                throw new Error('Connexion with server lost.')
-            }
-        } while (Date.now() < (serverState.time + SERVER_STATE_VALIDITY_DURATION) && serverState.task !== renderRequest.task)
-
-        switch(serverState.session) {
-            case 'pending':
-            case 'running':
-            case 'buffer':
-                // Normal expected messages.
-                break
-            case 'completed':
-                console.warn('Server %o render request %o completed unexpectedly', serverState, renderRequest)
-                break // Continue anyway to try to read cached result.
-            case 'error':
-                console.error('Server %o render request %o has failed', serverState, renderRequest)
-                break // Still valid, Update UI with error message
-            case 'stopped':
-                console.log('Server %o render request %o was stopped', serverState, renderRequest)
-                return false
-            default:
-                throw new Error('Unexpected server task state: ' + serverState.session || 'Undefined')
-        }
-
-        while (serverState.task === renderRequest.task && serverState.session === 'pending') {
-            // Wait for task to start on server.
-            await asyncDelay(TASK_START_DELAY_ON_SERVER)
-        }
-
-        // Task started!
-        res = await fetch(renderRequest.stream, {
-            headers: {
-                'Content-Type': 'application/json'
-            },
-        })
-
-        task['taskStatusLabel'].innerText = "Processing"
-        task['taskStatusLabel'].classList.add('activeTaskLabel')
-        task['taskStatusLabel'].classList.remove('waitingTaskLabel')
-
-        let stepUpdate = undefined
-        let reader = res.body.getReader()
-        let textDecoder = new TextDecoder()
-        let finalJSON = ''
-        let readComplete = false
-        while (!readComplete || finalJSON.length > 0) {
-            let t = Date.now()
-            let jsonStr = ''
-            if (!readComplete) {
-                const {value, done} = await reader.read()
-                if (done) {
-                    readComplete = true
-                }
-                if (value) {
-                    jsonStr = textDecoder.decode(value)
-                }
-            }
-            stepUpdate = undefined
-            try {
-                // hack for a middleman buffering all the streaming updates, and unleashing them on the poor browser in one shot.
-                // this results in having to parse JSON like {"step": 1}{"step": 2}{"step": 3}{"ste...
-                // which is obviously invalid and can happen at any point while rendering.
-                // So we need to extract only the next {} section
-                if (finalJSON.length > 0) {
-                    // Append new data when required
-                    if (jsonStr.length > 0) {
-                        jsonStr = finalJSON + jsonStr
-                    } else {
-                        jsonStr = finalJSON
-                    }
-                    finalJSON = ''
-                }
-                // Find next delimiter
-                let lastChunkIdx = jsonStr.indexOf('}{')
-                if (lastChunkIdx !== -1) {
-                    finalJSON = jsonStr.substring(0, lastChunkIdx + 1)
-                    jsonStr = jsonStr.substring(lastChunkIdx + 1)
-                } else {
-                    finalJSON = jsonStr
-                    jsonStr = ''
-                }
-                // Try to parse
-                stepUpdate = (finalJSON.length > 0 ? JSON.parse(finalJSON) : undefined)
-                finalJSON = jsonStr
-            } catch (e) {
-                if (e instanceof SyntaxError && !readComplete) {
-                    finalJSON += jsonStr
-                } else {
-                    throw e
-                }
-            }
-            if (typeof stepUpdate === 'object' && 'step' in stepUpdate) {
-                let batchSize = stepUpdate.total_steps
-                let overallStepCount = stepUpdate.step + task.batchesDone * batchSize
-                let totalSteps = batchCount * batchSize
-                let percent = 100 * (overallStepCount / totalSteps)
-                percent = (percent > 100 ? 100 : percent)
-                percent = percent.toFixed(0)
-                let timeTaken = stepUpdate.step_time // sec
-
-                let stepsRemaining = totalSteps - overallStepCount
-                stepsRemaining = (stepsRemaining < 0 ? 0 : stepsRemaining)
-                let timeRemaining = (timeTaken === -1 ? '' : stepsRemaining * timeTaken * 1000) // ms
-
-                outputMsg.innerHTML = `Batch ${task.batchesDone+1} of ${batchCount}`
-                outputMsg.innerHTML += `. Generating image(s): ${percent}%`
-
-                timeRemaining = (timeTaken !== -1 ? millisecondsToStr(timeRemaining) : '')
-                outputMsg.innerHTML += `. Time remaining (approx): ${timeRemaining}`
-                outputMsg.style.display = 'block'
-
-                progressBarInner.style.width = `${percent}%`
-                if (percent == 100) {
-                    task.progressBar.style.height = "0px"
-                    task.progressBar.style.border = "0px solid var(--background-color3)"
-                    task.progressBar.classList.remove("active")
-                }
-
-                if (stepUpdate.output !== undefined) {
-                    showImages(reqBody, stepUpdate, outputContainer, true)
-                }
-            }
-            if (stepUpdate?.status) {
-                break
-            }
-            if (readComplete && finalJSON.length <= 0) {
-                if (res.status === 200) {
-                    await asyncDelay(RETRY_DELAY_IF_BUFFER_IS_EMPTY)
-                    res = await fetch(renderRequest.stream, {
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                    })
-                    reader = res.body.getReader()
-                    readComplete = false
-                } else {
-                    console.log('Stream stopped: ', res)
-                }
-            }
-        }
-
         if (typeof stepUpdate === 'object' && stepUpdate.status !== 'succeeded') {
             let msg = ''
             if ('detail' in stepUpdate && typeof stepUpdate.detail === 'string' && stepUpdate.detail.length > 0) {
@@ -607,73 +357,38 @@ async function doMakeImage(task) {
             } else {
                 msg = `Unexpected Read Error:<br/><pre>StepUpdate: ${JSON.stringify(stepUpdate, undefined, 4)}</pre>`
             }
-            logError(msg, res, outputMsg)
+            logError(msg, stepUpdate, outputMsg)
             return false
         }
-        if (typeof stepUpdate !== 'object' || !res || res.status != 200) {
-            if (!isServerAvailable()) {
-                logError("Stable Diffusion is still starting up, please wait. If this goes on beyond a few minutes, Stable Diffusion has probably crashed. Please check the error message in the command-line window.", res, outputMsg)
-            } else if (typeof res === 'object') {
-                let msg = 'Stable Diffusion had an error reading the response: '
-                try { // 'Response': body stream already read
-                    msg += 'Read: ' + await res.text()
-                } catch(e) {
-                    msg += 'Unexpected end of stream. '
-                }
-                if (finalJSON) {
-                    msg += 'Buffered data: ' + finalJSON
-                }
-                logError(msg, res, outputMsg)
-            } else {
-                let msg = `Unexpected Read Error:<br/><pre>Response: ${res}<br/>StepUpdate: ${typeof stepUpdate === 'object' ? JSON.stringify(stepUpdate, undefined, 4) : stepUpdate}</pre>`
-                logError(msg, res, outputMsg)
-            }
-            return false
-        }
-
-        lastPromptUsed = reqBody['prompt']
-        showImages(reqBody, stepUpdate, outputContainer, false)
+        showImages(task.reqBody, stepUpdate, outputContainer, false)
     } catch (e) {
         console.log('request error', e)
-        logError('Stable Diffusion had an error. Please check the logs in the command-line window. <br/><br/>' + e + '<br/><pre>' + e.stack + '</pre>', res, outputMsg)
+        logError('Stable Diffusion had an error. Please check the logs in the command-line window. <br/><br/>' + e + '<br/><pre>' + e.stack + '</pre>', task, outputMsg)
         setStatus('request', 'error', 'error')
         return false
     }
     return true
 }
 
-async function checkTasks() {
-    if (taskQueue.length === 0) {
-        setStatus('request', 'done', 'success')
-        setTimeout(checkTasks, 500)
-        stopImageBtn.style.display = 'none'
-        renameMakeImageButton()
+function onTaskCompleted() {
+    setStatus('request', 'done', 'success')
+    stopImageBtn.style.display = 'none'
+    renameMakeImageButton()
 
-        currentTask = null
-
-        if (bellPending) {
-            if (isSoundEnabled()) {
-                playSound()
-            }
-            bellPending = false
-        }
-
-        return
+    if (SD.activeTasks.size <= 0 && isSoundEnabled()) {
+        playSound()
     }
+}
 
+async function onTaskStart(task) {
     setStatus('request', 'fetching..')
 
     stopImageBtn.style.display = 'block'
     renameMakeImageButton()
-    bellPending = true
 
     previewTools.style.display = 'block'
 
-    let task = taskQueue.pop()
-    currentTask = task
-
     let time = Date.now()
-
     let successCount = 0
 
     task.isProcessing = true
@@ -732,19 +447,6 @@ async function checkTasks() {
     if (randomSeedField.checked) {
         seedField.value = task.seed
     }
-
-    currentTask = null
-
-    if (typeof requestIdleCallback === 'function') {
-        requestIdleCallback(checkTasks, { timeout: 30 * 1000 })
-    } else {
-        setTimeout(checkTasks, 500)
-    }
-}
-if (typeof requestIdleCallback === 'function') {
-    requestIdleCallback(checkTasks, { timeout: 30 * 1000 })
-} else {
-    setTimeout(checkTasks, 10)
 }
 
 function getCurrentUserRequest() {
@@ -761,14 +463,14 @@ function getCurrentUserRequest() {
         seed,
 
         reqBody: {
-            session_id: sessionId,
+            session_id: SD.sessionId,
             seed,
             negative_prompt: negativePromptField.value.trim(),
             num_outputs: numOutputsParallel,
-            num_inference_steps: numInferenceStepsField.value,
-            guidance_scale: guidanceScaleField.value,
-            width: widthField.value,
-            height: heightField.value,
+            num_inference_steps: parseInt(numInferenceStepsField.value),
+            guidance_scale: parseFloat(guidanceScaleField.value),
+            width: parseInt(widthField.value),
+            height: parseInt(heightField.value),
             // allow_nsfw: allowNSFWField.checked,
             turbo: turboField.checked,
             use_cpu: useCPUField.checked,
@@ -782,7 +484,7 @@ function getCurrentUserRequest() {
     }
     if (IMAGE_REGEX.test(initImagePreview.src)) {
         newTask.reqBody.init_image = initImagePreview.src
-        newTask.reqBody.prompt_strength = promptStrengthField.value
+        newTask.reqBody.prompt_strength = parseFloat(promptStrengthField.value)
 
         // if (IMAGE_REGEX.test(maskImagePreview.src)) {
         //     newTask.reqBody.mask = maskImagePreview.src
@@ -807,7 +509,7 @@ function getCurrentUserRequest() {
 }
 
 function makeImage() {
-    if (!isServerAvailable()) {
+    if (!SD.isServerAvailable()) {
         alert('The server is not available.')
         return
     }
@@ -858,20 +560,16 @@ function createTask(task) {
     task['stopTask'] = taskEntry.querySelector('.stopTask')
 
     task['stopTask'].addEventListener('click', async function() {
-        if (task['isProcessing']) {
+        if (task.isProcessing) {
             task.isProcessing = false
             task.progressBar.classList.remove("active")
             try {
-                let res = await fetch('/image/stop?session_id=' + sessionId)
+                let res = await fetch('/image/stop?session_id=' + SD.sessionId)
             } catch (e) {
                 console.log(e)
             }
         } else {
-            let idx = taskQueue.indexOf(task)
-            if (idx >= 0) {
-                taskQueue.splice(idx, 1)
-            }
-
+            task.instance.abort()
             taskEntry.remove()
         }
     })
@@ -883,7 +581,104 @@ function createTask(task) {
         task.previewPrompt.innerHTML = '&nbsp;' // allows the results to be collapsed
     }
 
-    taskQueue.unshift(task)
+    const batchCount = task.batchCount
+    const outputContainer = document.createElement('div')
+
+    outputContainer.className = 'img-batch'
+    task.outputContainer.insertBefore(outputContainer, task.outputContainer.firstChild)
+
+    const outputMsg = task['outputMsg']
+    const progressBar = task['progressBar']
+    const progressBarInner = progressBar.querySelector("div")
+
+    let lastStatus = undefined
+    task['instance'] = new SD.RenderTask(task.reqBody)
+    task.instance.enqueue(async function(event) {
+        if ('update' in event) {
+            const stepUpdate = event.update
+            if (!('step' in stepUpdate)) {
+                return
+            }
+            let batchSize = stepUpdate.total_steps
+            let overallStepCount = stepUpdate.step + task.batchesDone * batchSize
+            let totalSteps = batchCount * batchSize
+            let percent = 100 * (overallStepCount / totalSteps)
+            percent = (percent > 100 ? 100 : percent)
+            percent = percent.toFixed(0)
+            let timeTaken = stepUpdate.step_time // sec
+
+            let stepsRemaining = totalSteps - overallStepCount
+            stepsRemaining = (stepsRemaining < 0 ? 0 : stepsRemaining)
+            let timeRemaining = (timeTaken === -1 ? '' : stepsRemaining * timeTaken * 1000) // ms
+
+            outputMsg.innerHTML = `Batch ${task.batchesDone+1} of ${batchCount}`
+            outputMsg.innerHTML += `. Generating image(s): ${percent}%`
+
+            timeRemaining = (timeTaken !== -1 ? millisecondsToStr(timeRemaining) : '')
+            outputMsg.innerHTML += `. Time remaining (approx): ${timeRemaining}`
+            outputMsg.style.display = 'block'
+
+            progressBarInner.style.width = `${percent}%`
+            if (percent == 100) {
+                task.progressBar.style.height = "0px"
+                task.progressBar.style.border = "0px solid var(--background-color3)"
+                task.progressBar.classList.remove("active")
+            }
+
+            if (stepUpdate.output) {
+                showImages(task.reqBody, stepUpdate, outputContainer, true)
+            }
+        }
+        if (this.status === lastStatus) {
+            return
+        }
+        lastStatus = this.status
+        switch(this.status) {
+            case SD.TaskStatus.pending:
+                task['taskStatusLabel'].innerText = "Pending"
+                task['taskStatusLabel'].classList.add('waitingTaskLabel')
+                break
+            case SD.TaskStatus.waiting:
+                task['taskStatusLabel'].innerText = "Waiting"
+                task['taskStatusLabel'].classList.add('waitingTaskLabel')
+                task['taskStatusLabel'].classList.remove('activeTaskLabel')
+                break
+            case SD.TaskStatus.processing:
+                task['taskStatusLabel'].innerText = "Processing"
+                task['taskStatusLabel'].classList.add('activeTaskLabel')
+                task['taskStatusLabel'].classList.remove('waitingTaskLabel')
+                break
+            case SD.TaskStatus.stopped:
+            case SD.TaskStatus.completed:
+                break
+            case SD.TaskStatus.failed:
+                if (!SD.isServerAvailable()) {
+                    logError("Stable Diffusion is still starting up, please wait. If this goes on beyond a few minutes, Stable Diffusion has probably crashed. Please check the error message in the command-line window.", event, outputMsg)
+                } else if (typeof event?.response === 'object') {
+                    let msg = 'Stable Diffusion had an error reading the response:<br/><pre>'
+                    if (this.exception) {
+                        msg += `Error: ${this.exception.message}<br/>`
+                    }
+                    try { // 'Response': body stream already read
+                        msg += 'Read: ' + await event.response.text()
+                    } catch(e) {
+                        msg += 'Unexpected end of stream. '
+                    }
+                    const bufferString = event.reader.bufferedString
+                    if (bufferString) {
+                        msg += 'Buffered data: ' + bufferString
+                    }
+                    msg += '</pre>'
+                    logError(msg, event, outputMsg)
+                } else {
+                    let msg = `Unexpected Read Error:<br/><pre>Error:${this.exception}<br/>EventInfo: ${JSON.stringify(event, undefined, 4)}</pre>`
+                    logError(msg, event, outputMsg)
+                }
+                break
+        }
+    }).then(function(renderResult) {
+        showImages(task.reqBody, renderResult, outputContainer, false)
+    })
 }
 
 function getPrompts() {
@@ -994,19 +789,16 @@ function createFileName(prompt, seed, steps, guidance, outputFormat) {
 }
 
 async function stopAllTasks() {
-    taskQueue.forEach(task => {
+    SD.activeTasks.forEach(task => {
         task.isProcessing = false
+        task.instance.abort()
     })
-    taskQueue = []
-
-    if (currentTask !== null) {
-        currentTask.isProcessing = false
-    }
 
     try {
-        let res = await fetch('/image/stop?session_id=' + sessionId)
+        let res = await fetch('/image/stop?session_id=' + SD.sessionId)
+        console.log('Stop all response', res)
     } catch (e) {
-        console.log(e)
+        console.error(e)
     }
 }
 
@@ -1035,7 +827,7 @@ function renameMakeImageButton() {
     if (totalImages > 1) {
         imageLabel = totalImages + ' Images'
     }
-    if (taskQueue.length == 0) {
+    if (SD.activeTasks.length == 0) {
         makeImageBtn.innerText = 'Make ' + imageLabel
     } else {
         makeImageBtn.innerText = 'Enqueue Next ' + imageLabel
@@ -1108,7 +900,7 @@ promptStrengthField.addEventListener('input', updatePromptStrengthSlider)
 updatePromptStrength()
 
 async function changeAppConfig(configDelta) {
-    // if (!isServerAvailable()) {
+    // if (!SD.isServerAvailable()) {
     //     // logError('The server is still starting up..')
     //     alert('The server is still starting up..')
     //     e.preventDefault()

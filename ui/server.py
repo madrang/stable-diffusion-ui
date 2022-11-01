@@ -42,7 +42,7 @@ import logging
 #import queue, threading, time
 from typing import Any, Generator, Hashable, List, Optional, Union
 
-from sd_internal import Request, Response, task_manager
+from sd_internal import Request, Response, task_manager, plugins
 
 app = FastAPI()
 
@@ -377,8 +377,6 @@ def get_image(session_id, img_id):
     if not task.temp_images[img_id]: raise HTTPException(status_code=425, detail='Too Early, task data is not available yet.') # HTTP425 Too Early
     try:
         img_data = task.temp_images[img_id]
-        if isinstance(img_data, str):
-            return img_data
         img_data.seek(0)
         return StreamingResponse(img_data, media_type='image/jpeg')
     except KeyError as e:
@@ -386,6 +384,7 @@ def get_image(session_id, img_id):
 
 @app.get('/')
 def read_root():
+    # plugins.inject_loader()
     return FileResponse(os.path.join(SD_UI_DIR, 'index.html'), headers=NOCACHE_HEADERS)
 
 @app.on_event("shutdown")
