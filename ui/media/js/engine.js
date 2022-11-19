@@ -596,13 +596,19 @@
                 case TaskStatus.pending:
                 case TaskStatus.waiting:
                     // Wait for server status to include this task.
-                    await waitUntil(async () => ((task.#id && serverState.task === task.#id)
-                        || await Promise.resolve(callback?.call(task))
-                        || signal?.aborted),
+                    await waitUntil(
+                        async () => {
+                            if (task.#id && typeof serverState.tasks === 'object' && Object.keys(serverState.tasks).includes(String(task.#id))) {
+                                return true
+                            }
+                            if (await Promise.resolve(callback?.call(task)) || signal?.aborted) {
+                                return true
+                            }
+                        },
                         TASK_STATE_SERVER_UPDATE_DELAY,
                         timeout,
                     )
-                    if (this.#id && serverState.task === this.#id) {
+                    if (this.#id && typeof serverState.tasks === 'object' && Object.keys(serverState.tasks).includes(String(task.#id))) {
                         this._setStatus(TaskStatus.waiting)
                     }
                     if (await Promise.resolve(callback?.call(this)) || signal?.aborted) {
@@ -612,19 +618,20 @@
                         return true
                     }
                     // Wait for task to start on server.
-                    await waitUntil(async () => (serverState.task !== task.#id || serverState.session !== 'pending'
-                        || await Promise.resolve(callback?.call(task))
-                        || signal?.aborted),
+                    await waitUntil(
+                        async () => {
+                            if (typeof serverState.tasks !== 'object' || serverState.tasks[String(task.#id)] !== 'pending') {
+                                return true
+                            }
+                            if (await Promise.resolve(callback?.call(task)) || signal?.aborted) {
+                                return true
+                            }
+                        },
                         TASK_STATE_SERVER_UPDATE_DELAY,
                         timeout,
                     )
-                    if (serverState.task === this.#id
-                        && (
-                            serverState.session === 'running'
-                            || serverState.session === 'buffer'
-                            || serverState.session === 'completed'
-                        )
-                    ) {
+                    const state = (typeof serverState.tasks === 'object' ? serverState.tasks[String(task.#id)] : undefined)
+                    if (state === 'running' || state === 'buffer' || state === 'completed') {
                         this._setStatus(TaskStatus.processing)
                     }
                     if (await Promise.resolve(callback?.call(task)) || signal?.aborted) {
@@ -634,9 +641,15 @@
                         return true
                     }
                 case TaskStatus.processing:
-                    await waitUntil(async () => (serverState.task !== task.#id || serverState.session !== 'running'
-                        || await Promise.resolve(callback?.call(task))
-                        || signal?.aborted),
+                    await waitUntil(
+                        async () => {
+                            if (typeof serverState.tasks !== 'object' || serverState.tasks[String(task.#id)] !== 'running') {
+                                return true
+                            }
+                            if (await Promise.resolve(callback?.call(task)) || signal?.aborted) {
+                                return true
+                            }
+                        },
                         TASK_STATE_SERVER_UPDATE_DELAY,
                         timeout,
                     )
@@ -913,7 +926,8 @@
                 throw e
             }
             // Update class status and callback.
-            switch(serverState.session) {
+            const taskState = (typeof serverState.tasks === 'object' ? serverState.tasks[String(this.id)] : undefined)
+            switch(taskState) {
                 case 'pending': // Session has pending tasks.
                     console.error('Server %o render request %o is still waiting.', serverState, renderRequest)
                     //Only update status if not already set by waitUntil
@@ -946,7 +960,7 @@
                     return false
                 default:
                     if (!progressCallback) {
-                        const err = new Error('Unexpected server task state: ' + serverState.session || 'Undefined')
+                        const err = new Error('Unexpected server task state: ' + taskState || 'Undefined')
                         this.abort(err)
                         throw err
                     }
@@ -1088,6 +1102,14 @@
         return models
     }
 
+    function getServerCapacity() {
+        let activeDevicesCount = Object.keys(serverState?.devices?.active || {}).length
+        if (window.document.visibilityState === 'hidden') {
+            activeDevicesCount = 1 + activeDevicesCount
+        }
+        return activeDevicesCount
+    }
+
     function continueTasks() {
         if (typeof navigator?.scheduling?.isInputPending === 'function') {
             const inputPendingOptions = {
@@ -1100,12 +1122,16 @@
                 return asyncDelay(CONCURRENT_TASK_INTERVAL)
             }
         }
+        const serverCapacity = getServerCapacity()
         if (task_queue.size <= 0 && concurrent_generators.size <= 0) {
-            fireEvent(EVENT_IDLE, {})
+            fireEvent(EVENT_IDLE, {capacity: serverCapacity})
             // Calling idle could result in task being added to queue.
             if (task_queue.size <= 0 && concurrent_generators.size <= 0) {
                 return asyncDelay(IDLE_COOLDOWN)
             }
+        }
+        if (task_queue.size < serverCapacity){
+            fireEvent(EVENT_IDLE, {capacity: serverCapacity - task_queue.size})
         }
         const completedTasks = []
         for (let [generator, promise] of concurrent_generators.entries()) {
@@ -1145,7 +1171,6 @@
             concurrent_generators.set(generator, promise)
         }
 
-        const serverCapacity = 2
         for (let [task, generator] of task_queue.entries()) {
             if (task.isCompleted || task.isStopped) {
                 const eventEndArgs = {task, generator}
@@ -1234,6 +1259,7 @@
         removeEventListener,
 
         isServerAvailable,
+        getServerCapacity,
 
         getDevices: debounce(getDevices, 250, true),
         getModels: debounce(getModels, 250, true),
@@ -1246,6 +1272,14 @@
         serverState: {
             configurable: false,
             get: () => serverState,
+        },
+        isAvailable: {
+            configurable: false,
+            get: () => isServerAvailable(),
+        },
+        serverCapacity: {
+            configurable: false,
+            get: () => getServerCapacity(),
         },
         sessionId: {
             configurable: false,

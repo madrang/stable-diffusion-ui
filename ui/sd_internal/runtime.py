@@ -74,7 +74,7 @@ def thread_init(device):
 
     thread_data.turbo = False
     thread_data.force_full_precision = False
-    thread_data.reduced_memory = True
+    thread_data.reduced_memory = False
 
     device_manager.device_init(thread_data, device)
 
@@ -118,22 +118,25 @@ def load_model_ckpt():
     model.cdevice = torch.device(thread_data.device)
     model.unet_bs = thread_data.unet_bs
     model.turbo = thread_data.turbo
-    # if thread_data.device != 'cpu':
-    #     model.to(thread_data.device)
-    #if thread_data.reduced_memory:
-        #model.model1.to("cpu")
-        #model.model2.to("cpu")
+    if thread_data.device != 'cpu':
+        if thread_data.reduced_memory:
+            #model.model1.to("cpu")
+            #model.model2.to("cpu")
+            pass
+        else:
+            model.to(thread_data.device)
     thread_data.model = model
 
     modelCS = instantiate_from_config(config.modelCondStage)
     _, _ = modelCS.load_state_dict(sd, strict=False)
     modelCS.eval()
     modelCS.cond_stage_model.device = torch.device(thread_data.device)
-    # if thread_data.device != 'cpu':
-    #     if thread_data.reduced_memory:
-    #         modelCS.to('cpu')
-    #     else:
-    #         modelCS.to(thread_data.device) # Preload on device if not already there.
+    if thread_data.device != 'cpu':
+        if thread_data.reduced_memory:
+            #modelCS.to('cpu')
+            pass
+        else:
+            modelCS.to(thread_data.device) # Preload on device if not already there.
     thread_data.modelCS = modelCS
 
     modelFS = instantiate_from_config(config.modelFirstStage)
@@ -160,11 +163,12 @@ def load_model_ckpt():
             thread_data.vae_file = None
 
     modelFS.eval()
-    # if thread_data.device != 'cpu':
-    #     if thread_data.reduced_memory:
-    #         modelFS.to('cpu')
-    #     else:
-    #         modelFS.to(thread_data.device) # Preload on device if not already there.
+    if thread_data.device != 'cpu':
+        if thread_data.reduced_memory:
+            #modelFS.to('cpu')
+            pass
+        else:
+            modelFS.to(thread_data.device) # Preload on device if not already there.
     thread_data.modelFS = modelFS
     del sd
 
@@ -218,30 +222,6 @@ def unload_models():
     thread_data.modelFS = None
 
     gc()
-
-def wait_model_move_to(model, target_device): # Send to target_device and wait until complete.
-    if thread_data.device == target_device: return
-    start_mem = torch.cuda.memory_allocated(thread_data.device) / 1e6
-    if start_mem <= 0: return
-    model_name = model.__class__.__name__
-    print(f'Device {thread_data.device} - Sending model {model_name} to {target_device} | Memory transfer starting. Memory Used: {round(start_mem)}Mb')
-    start_time = time.time()
-    model.to(target_device)
-    time_step = start_time
-    WARNING_TIMEOUT = 1.5 # seconds - Show activity in console after timeout.
-    last_mem = start_mem
-    is_transfering = True
-    while is_transfering:
-        time.sleep(0.5) # 500ms
-        mem = torch.cuda.memory_allocated(thread_data.device) / 1e6
-        is_transfering = bool(mem > 0 and mem < last_mem) # still stuff loaded, but less than last time.
-        last_mem = mem
-        if not is_transfering:
-            break;
-        if time.time() - time_step > WARNING_TIMEOUT: # Long delay, print to console to show activity.
-            print(f'Device {thread_data.device} - Waiting for Memory transfer. Memory Used: {round(mem)}Mb, Transfered: {round(start_mem - mem)}Mb')
-            time_step = time.time()
-    print(f'Device {thread_data.device} - {model_name} Moved: {round(start_mem - last_mem)}Mb in {round(time.time() - start_time, 3)} seconds to {target_device}')
 
 def load_model_gfpgan():
     if thread_data.gfpgan_file is None: raise ValueError(f'Thread gfpgan_file is undefined.')
@@ -334,13 +314,7 @@ def mk_img(req: Request):
         yield from do_mk_img(req)
     except Exception as e:
         print(traceback.format_exc())
-
-        if thread_data.device != 'cpu':
-            thread_data.modelFS.to('cpu')
-            thread_data.modelCS.to('cpu')
-            thread_data.model.model1.to("cpu")
-            thread_data.model.model2.to("cpu")
-
+        unload_models()
         gc() # Release from memory.
         yield json.dumps({
             "status": 'failed',
@@ -362,8 +336,8 @@ def update_temp_img(req, x_samples):
         del img, x_sample, x_sample_ddim
         # don't delete x_samples, it is used in the code that called this callback
 
-        thread_data.temp_images[str(req.session_id) + '/' + str(i)] = buf
-        partial_images.append({'path': f'/image/tmp/{req.session_id}/{i}'})
+        thread_data.temp_images[f'{req.request_id}/{i}'] = buf
+        partial_images.append({'path': f'/image/tmp/{req.request_id}/{i}'})
     return partial_images
 
 # Build and return the apropriate generator for do_mk_img
@@ -483,17 +457,12 @@ def do_mk_img(req: Request):
             if thread_data.device != "cpu" and thread_data.precision == "autocast":
                 mask = mask.half()
 
-        # Send to CPU and wait until complete.
-        wait_model_move_to(thread_data.modelFS, 'cpu')
+        if thread_data.reduced_memory:
+            thread_data.modelFS.to('cpu')
 
         assert 0. <= req.prompt_strength <= 1., 'can only work with strength in [0.0, 1.0]'
         t_enc = int(req.prompt_strength * req.num_inference_steps)
         print(f"target t_enc is {t_enc} steps")
-
-    if req.save_to_disk_path is not None:
-        session_out_path = get_session_out_path(req.save_to_disk_path, req.session_id)
-    else:
-        session_out_path = None
 
     with torch.no_grad():
         for n in trange(opt_n_iter, desc="Sampling"):
@@ -523,6 +492,7 @@ def do_mk_img(req: Request):
 
                     if thread_data.reduced_memory:
                         thread_data.modelFS.to(thread_data.device)
+                        thread_data.modelCS.to('cpu')
 
                     n_steps = req.num_inference_steps if req.init_image is None else t_enc
                     img_callback = get_image_progress_generator(req, {"total_steps": n_steps})
@@ -561,8 +531,7 @@ def do_mk_img(req: Request):
                     del x_samples, x_samples_ddim, x_sample
 
                     if thread_data.reduced_memory:
-                        # Send to CPU and wait until complete.
-                        wait_model_move_to(thread_data.modelFS, 'cpu')
+                        thread_data.modelFS.to('cpu')
 
                     print("saving images")
                     for i in range(batch_size):
@@ -615,8 +584,8 @@ def do_mk_img(req: Request):
                         # Filter Applied, move to next seed
                         opt_seed += 1
 
-                    # if thread_data.reduced_memory:
-                    #     unload_filters()
+                    if thread_data.reduced_memory:
+                        unload_filters()
                     del img_data
                     gc()
                     if thread_data.device != 'cpu':
@@ -654,9 +623,6 @@ VAE model: {req.use_vae_model}
 
 def _txt2img(opt_W, opt_H, opt_n_samples, opt_ddim_steps, opt_scale, start_code, opt_C, opt_f, opt_ddim_eta, c, uc, opt_seed, img_callback, mask, sampler_name):
     shape = [opt_n_samples, opt_C, opt_H // opt_f, opt_W // opt_f]
-
-    # Send to CPU and wait until complete.
-    wait_model_move_to(thread_data.modelCS, 'cpu')
 
     if sampler_name == 'ddim':
         thread_data.model.make_schedule(ddim_num_steps=opt_ddim_steps, ddim_eta=opt_ddim_eta, verbose=False)
