@@ -7,7 +7,6 @@ import traceback
 
 import sys
 import os
-import picklescan.scanner
 import rich
 
 SD_DIR = os.getcwd()
@@ -47,7 +46,6 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 import logging
-#import queue, threading, time
 from typing import Any, Generator, Hashable, List, Optional, Union
 
 from sd_internal import Request, Response, task_manager
@@ -221,6 +219,7 @@ async def setAppConfig(req : SetAppConfigRequest):
 
 def is_malicious_model(file_path):
     try:
+        import picklescan.scanner
         scan_result = picklescan.scanner.scan_file_path(file_path)
         if scan_result.issues_count > 0 or scan_result.infected_files > 0:
             rich.print(":warning: [bold red]Scan %s: %d scanned, %d issue, %d infected.[/bold red]" % (file_path, scan_result.scanned_files, scan_result.issues_count, scan_result.infected_files))
@@ -230,7 +229,6 @@ def is_malicious_model(file_path):
             return False
     except Exception as e:
         print('error while scanning', file_path, 'error:', e)
-
     return False
 
 def getModels():
