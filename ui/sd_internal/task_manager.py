@@ -204,6 +204,7 @@ task_cache = DataCache()
 default_model_to_load = None
 default_vae_to_load = None
 weak_thread_data = weakref.WeakKeyDictionary()
+idle_event: threading.Event = threading.Event()
 
 class SessionState():
     def __init__(self, id: str):
@@ -317,13 +318,14 @@ def thread_render(device):
             return
         task = thread_get_next_task()
         if task is None:
+            idle_event.clear()
             if runtime.thread_data.device == 'cpu' and is_alive() > 1 and hasattr(runtime.thread_data, 'lastActive') and time.time() - runtime.thread_data.lastActive > CPU_UNLOAD_TIMEOUT:
                 # GPUs present and CPU is idle. Unload resources.
                 runtime.unload_models()
                 runtime.unload_filters()
                 del runtime.thread_data.lastActive
                 print('unloaded models from CPU because it was idle for too long')
-            time.sleep(0.05)
+            idle_event.wait(timeout=1)
             continue
         if task.error is not None:
             print(task.error)
@@ -608,6 +610,7 @@ def render(req : ImageRequest):
         if manager_lock.acquire(blocking=True, timeout=LOCK_TIMEOUT * 2):
             try:
                 tasks_queue.append(new_task)
+                idle_event.set()
                 return new_task
             finally:
                 manager_lock.release()
