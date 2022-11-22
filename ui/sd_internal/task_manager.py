@@ -323,7 +323,7 @@ def thread_render(device):
                 runtime.unload_filters()
                 del runtime.thread_data.lastActive
                 print('unloaded models from CPU because it was idle for too long')
-            time.sleep(1)
+            time.sleep(0.05)
             continue
         if task.error is not None:
             print(task.error)

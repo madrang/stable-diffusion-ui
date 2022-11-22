@@ -223,6 +223,30 @@ def unload_models():
 
     gc()
 
+def wait_model_move_to(model, target_device): # Send to target_device and wait until complete.
+    if thread_data.device == target_device: return
+    start_mem = torch.cuda.memory_allocated(thread_data.device) / 1e6
+    if start_mem <= 0: return
+    model_name = model.__class__.__name__
+    print(f'Device {thread_data.device} - Sending model {model_name} to {target_device} | Memory transfer starting. Memory Used: {round(start_mem)}Mb')
+    start_time = time.time()
+    model.to(target_device)
+    time_step = start_time
+    WARNING_TIMEOUT = 1.5 # seconds - Show activity in console after timeout.
+    last_mem = start_mem
+    is_transfering = True
+    while is_transfering:
+        time.sleep(0.5) # 500ms
+        mem = torch.cuda.memory_allocated(thread_data.device) / 1e6
+        is_transfering = bool(mem > 0 and mem < last_mem) # still stuff loaded, but less than last time.
+        last_mem = mem
+        if not is_transfering:
+            break;
+        if time.time() - time_step > WARNING_TIMEOUT: # Long delay, print to console to show activity.
+            print(f'Device {thread_data.device} - Waiting for Memory transfer. Memory Used: {round(mem)}Mb, Transfered: {round(start_mem - mem)}Mb')
+            time_step = time.time()
+    print(f'Device {thread_data.device} - {model_name} Moved: {round(start_mem - last_mem)}Mb in {round(time.time() - start_time, 3)} seconds to {target_device}')
+
 def load_model_gfpgan():
     if thread_data.gfpgan_file is None: raise ValueError(f'Thread gfpgan_file is undefined.')
 
@@ -459,6 +483,7 @@ def do_mk_img(req: Request):
 
         if thread_data.reduced_memory:
             thread_data.modelFS.to('cpu')
+            # wait_model_move_to(thread_data.modelFS, 'cpu')
 
         assert 0. <= req.prompt_strength <= 1., 'can only work with strength in [0.0, 1.0]'
         t_enc = int(req.prompt_strength * req.num_inference_steps)
@@ -493,6 +518,7 @@ def do_mk_img(req: Request):
                     if thread_data.reduced_memory:
                         thread_data.modelFS.to(thread_data.device)
                         thread_data.modelCS.to('cpu')
+                        # wait_model_move_to(thread_data.modelCS, 'cpu')
 
                     n_steps = req.num_inference_steps if req.init_image is None else t_enc
                     img_callback = get_image_progress_generator(req, {"total_steps": n_steps})
@@ -532,6 +558,7 @@ def do_mk_img(req: Request):
 
                     if thread_data.reduced_memory:
                         thread_data.modelFS.to('cpu')
+                        # wait_model_move_to(thread_data.modelFS, 'cpu')
 
                     print("saving images")
                     for i in range(batch_size):
@@ -586,6 +613,8 @@ def do_mk_img(req: Request):
 
                     if thread_data.reduced_memory:
                         unload_filters()
+                        # thread_data.modelFS.to('cpu')
+                        # wait_model_move_to(thread_data.modelFS, 'cpu')
                     del img_data
                     gc()
                     if thread_data.device != 'cpu':

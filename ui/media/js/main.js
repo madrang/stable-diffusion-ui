@@ -424,6 +424,24 @@ function makeImage() {
         alert('The server is not available.')
         return
     }
+    if (!randomSeedField.checked && seedField.value == '') {
+        alert('The "Seed" field must not be empty.')
+        return
+    }
+    if (numInferenceStepsField.value == '') {
+        alert('The "Inference Steps" field must not be empty.')
+        return
+    }
+    if (numOutputsTotalField.value == '') {
+        numOutputsTotalField.value = 1
+    }
+    if (numOutputsParallelField.value == '') {
+        numOutputsParallelField.value = 1
+    }
+    if (guidanceScaleField.value == '') {
+        guidanceScaleField.value = guidanceScaleSlider.value / 10
+    }
+
     const taskTemplate = getCurrentUserRequest()
     const newTaskRequests = []
     getPrompts().forEach((prompt) => newTaskRequests.push(Object.assign({}, taskTemplate, {
