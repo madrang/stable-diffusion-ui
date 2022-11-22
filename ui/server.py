@@ -380,16 +380,17 @@ def stream(task_id:int):
     return StreamingResponse(task.read_buffer_generator(), media_type='application/json')
 
 @app.get('/image/stop')
-def stop(session_id:str=None):
-    if not session_id:
+def stop(task: int):
+    if not task:
         if task_manager.current_state == task_manager.ServerStates.Online or task_manager.current_state == task_manager.ServerStates.Unavailable:
             raise HTTPException(status_code=409, detail='Not currently running any tasks.') # HTTP409 Conflict
         task_manager.current_state_error = StopAsyncIteration('')
         return {'OK'}
-    task = task_manager.get_cached_task(session_id, update_ttl=False)
-    if not task: raise HTTPException(status_code=404, detail=f'Session {session_id} has no active task.') # HTTP404 Not Found
-    if isinstance(task.error, StopAsyncIteration): raise HTTPException(status_code=409, detail=f'Session {session_id} task is already stopped.') # HTTP409 Conflict
-    task.error = StopAsyncIteration('')
+    task_id = task
+    task = task_manager.get_cached_task(task_id, update_ttl=False)
+    if not task: raise HTTPException(status_code=404, detail=f'Task {task_id} was not found.') # HTTP404 Not Found
+    if isinstance(task.error, StopAsyncIteration): raise HTTPException(status_code=409, detail=f'Task {task_id} is already stopped.') # HTTP409 Conflict
+    task.error = StopAsyncIteration(f'Task {task_id} stop requested.')
     return {'OK'}
 
 @app.get('/image/tmp/{task_id:int}/{img_id:int}')

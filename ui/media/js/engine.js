@@ -423,7 +423,7 @@
                     throw new Error('exception is not an Error or a string.')
                 }
             }
-            const res = await fetch('/image/stop?session_id=' + SD.sessionId)
+            const res = await fetch('/image/stop?task=' + this.id)
             if (!res.ok) {
                 console.log('Stop response:', res)
                 throw new Error(res.statusText)
