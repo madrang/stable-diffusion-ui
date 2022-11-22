@@ -52,7 +52,6 @@ from sd_internal import Request, Response, task_manager
 
 app = FastAPI()
 
-modifiers_cache = None
 outpath = os.path.join(os.path.expanduser("~"), OUTPUT_DIRNAME)
 
 os.makedirs(USER_UI_PLUGINS_DIR, exist_ok=True)
@@ -231,6 +230,32 @@ def is_malicious_model(file_path):
         print('error while scanning', file_path, 'error:', e)
     return False
 
+known_models = {}
+def listModels(models, models_dirname, model_type, model_extensions):
+    models_dir = os.path.join(MODELS_DIR, models_dirname)
+    if not os.path.exists(models_dir):
+        os.makedirs(models_dir)
+
+    for file in os.listdir(models_dir):
+        for model_extension in model_extensions:
+            if not file.endswith(model_extension):
+                continue
+
+            model_path = os.path.join(models_dir, file)
+            mtime = os.path.getmtime(model_path)
+            mod_time = known_models[model_path] if model_path in known_models else 0
+            if mod_time != mtime:
+                if is_malicious_model(model_path):
+                    models['scan-error'] = file
+                    return
+            known_models[model_path] = mtime
+
+            model_name = file[:-len(model_extension)]
+            models['options'][model_type].append(model_name)
+
+    models['options'][model_type] = [*set(models['options'][model_type])] # remove duplicates
+    models['options'][model_type].sort()
+
 def getModels():
     models = {
         'active': {
@@ -243,29 +268,9 @@ def getModels():
         },
     }
 
-    def listModels(models_dirname, model_type, model_extensions):
-        models_dir = os.path.join(MODELS_DIR, models_dirname)
-        if not os.path.exists(models_dir):
-            os.makedirs(models_dir)
-
-        for file in os.listdir(models_dir):
-            for model_extension in model_extensions:
-                if not file.endswith(model_extension):
-                    continue
-
-                if is_malicious_model(os.path.join(models_dir, file)):
-                    models['scan-error'] = file
-                    return
-
-                model_name = file[:-len(model_extension)]
-                models['options'][model_type].append(model_name)
-
-        models['options'][model_type] = [*set(models['options'][model_type])] # remove duplicates
-        models['options'][model_type].sort()
-
     # custom models
-    listModels(models_dirname='stable-diffusion', model_type='stable-diffusion', model_extensions=STABLE_DIFFUSION_MODEL_EXTENSIONS)
-    listModels(models_dirname='vae', model_type='vae', model_extensions=VAE_MODEL_EXTENSIONS)
+    listModels(models, models_dirname='stable-diffusion', model_type='stable-diffusion', model_extensions=STABLE_DIFFUSION_MODEL_EXTENSIONS)
+    listModels(models, models_dirname='vae', model_type='vae', model_extensions=VAE_MODEL_EXTENSIONS)
 
     # legacy
     custom_weight_path = os.path.join(SD_DIR, 'custom-model.ckpt')
@@ -422,6 +427,9 @@ class LogSuppressFilter(logging.Filter):
                 return False
         return True
 logging.getLogger('uvicorn.access').addFilter(LogSuppressFilter())
+
+# Check models and prepare cache for UI open
+getModels()
 
 # Start the task_manager
 task_manager.default_model_to_load = resolve_ckpt_to_use()
