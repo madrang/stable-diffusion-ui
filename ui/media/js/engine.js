@@ -1124,13 +1124,13 @@
         }
         const serverCapacity = getServerCapacity()
         if (task_queue.size <= 0 && concurrent_generators.size <= 0) {
-            fireEvent(EVENT_IDLE, {capacity: serverCapacity})
+            fireEvent(EVENT_IDLE, {capacity: serverCapacity, idle: true})
             // Calling idle could result in task being added to queue.
             if (task_queue.size <= 0 && concurrent_generators.size <= 0) {
                 return asyncDelay(IDLE_COOLDOWN)
             }
         }
-        if (task_queue.size < serverCapacity){
+        if (task_queue.size < serverCapacity) {
             fireEvent(EVENT_IDLE, {capacity: serverCapacity - task_queue.size})
         }
         const completedTasks = []
