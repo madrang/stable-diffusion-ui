@@ -31,9 +31,13 @@ const COLLAPSIBLE_PANELS = []; // filled in by createCollapsibles with all the e
 // on-init call this for any panels that are marked open
 function toggleCollapsible(element) {
     const collapsibleHeader = element.querySelector(".collapsible");
-    const handle = element.querySelector(".collapsible-handle");
     collapsibleHeader.classList.toggle("active")
-    let content = getNextSibling(collapsibleHeader, '.collapsible-content')
+    const content = getNextSibling(collapsibleHeader, '.collapsible-content')
+    if (!content) {
+        console.warn('Collapsible element %o has no content.', element)
+        return
+    }
+    const handle = element.querySelector(".collapsible-handle");
     if (!collapsibleHeader.classList.contains("active")) {
         content.style.display = "none"
         if (handle != null) {  // render results don't have a handle
@@ -45,7 +49,6 @@ function toggleCollapsible(element) {
             handle.innerHTML = '&#x2796;' // minus
         }
     }
-    
     if (COLLAPSIBLES_INITIALIZED && COLLAPSIBLE_PANELS.includes(element)) {
         saveCollapsibles()
     }
