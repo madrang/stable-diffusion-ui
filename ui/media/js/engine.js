@@ -1091,10 +1091,6 @@
                 return models
             }
             models = await res.json()
-            if ('options' in models) {
-                models = Object.assign(models, models.options)
-                delete models.options
-            }
             console.log('get models response', models)
         } catch (e) {
             console.log('get models error', e)
