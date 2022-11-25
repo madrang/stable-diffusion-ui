@@ -1087,7 +1087,7 @@
             }
         }
         if (task_queue.size < serverCapacity) {
-            fireEvent(EVENT_IDLE, {capacity: serverCapacity - task_queue.size})
+            eventSource.fireEvent(EVENT_IDLE, {capacity: serverCapacity - task_queue.size})
         }
         const completedTasks = []
         for (let [generator, promise] of concurrent_generators.entries()) {
