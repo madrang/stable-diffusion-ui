@@ -104,14 +104,6 @@ let soundToggle = document.querySelector('#sound_toggle')
 let serverStatusColor = document.querySelector('#server-status-color')
 let serverStatusMsg = document.querySelector('#server-status-msg')
 
-document.querySelector('.drawing-board-control-navigation-back').innerHTML = '<i class="fa-solid fa-rotate-left"></i>'
-document.querySelector('.drawing-board-control-navigation-forward').innerHTML = '<i class="fa-solid fa-rotate-right"></i>'
-
-let maskResetButton = document.querySelector('.drawing-board-control-navigation-reset')
-maskResetButton.innerHTML = 'Clear'
-maskResetButton.style.fontWeight = 'normal'
-maskResetButton.style.fontSize = '10pt'
-
 function getLocalStorageBoolItem(key, fallback) {
     let item = localStorage.getItem(key)
     if (item === null) {
@@ -164,6 +156,35 @@ function setServerStatus(event) {
     }
     if (SD.serverState.devices) {
         setSystemInfo(SD.serverState.devices)
+    }
+}
+
+// shiftOrConfirm(e, prompt, fn)
+//   e      : MouseEvent
+//   prompt : Text to be shown as prompt. Should be a question to which "yes" is a good answer.
+//   fn     : function to be called if the user confirms the dialog or has the shift key pressed
+//
+// If the user had the shift key pressed while clicking, the function fn will be executed.
+// If the setting "confirm_dangerous_actions" in the system settings is disabled, the function 
+// fn will be executed.
+// Otherwise, a confirmation dialog is shown. If the user confirms, the function fn will also
+// be executed.
+function shiftOrConfirm(e, prompt, fn) {
+    e.stopPropagation()
+    if (e.shiftKey || !confirmDangerousActionsField.checked) {
+         fn(e)
+    } else {
+        $.confirm({
+            theme: 'modern',
+            title: prompt,
+            useBootstrap: false,
+            animateFromElement: false,
+            content: '<small>Tip: To skip this dialog, use shift-click or disable the "Confirm dangerous actions" setting in the Settings tab.</small>',
+            buttons: {
+                yes: () => { fn(e) },
+                cancel: () => {}
+            }
+        }); 
     }
 }
 
@@ -321,11 +342,7 @@ function onUseAsInputClick(req, img) {
     initImageSelector.value = null
     initImagePreview.src = imgData
 
-    initImagePreviewContainer.style.display = 'block'
-    inpaintingEditorContainer.style.display = 'none'
-    promptStrengthContainer.style.display = 'table-row'
     maskSetting.checked = false
-    samplerSelectionContainer.style.display = 'none'
 }
 
 function onDownloadImageClick(req, img) {
@@ -683,6 +700,11 @@ function onTaskStart(task) {
         newTaskReqBody.seed = parseInt(startSeed) + (task.batchesDone * newTaskReqBody.num_outputs)
     }
 
+    // Update the seed *before* starting the processing so it's retained if user stops the task
+    if (randomSeedField.checked) {
+        seedField.value = task.seed
+    }
+
     const outputContainer = document.createElement('div')
     outputContainer.className = 'img-batch'
     task.outputContainer.insertBefore(outputContainer, task.outputContainer.firstChild)
@@ -772,12 +794,14 @@ function createTask(task) {
     task['progressBar'] = taskEntry.querySelector('.progress-bar')
     task['stopTask'] = taskEntry.querySelector('.stopTask')
 
-    task['stopTask'].addEventListener('click', async function(e) {
-        e.stopPropagation()
-        if (task.batchesDone <= 0 || !task.isProcessing) {
-            taskEntry.remove()
-        }
-        abortTask(task)
+    task['stopTask'].addEventListener('click', (e) => {
+        let question = (task['isProcessing'] ? "Stop this task?" : "Remove this task?")
+        shiftOrConfirm(e, question, async function(e) {
+            if (task.batchesDone <= 0 || !task.isProcessing) {
+                taskEntry.remove()
+            }
+            abortTask(task)
+        })
     })
 
     task['useSettings'] = taskEntry.querySelector('.useSettings')
@@ -849,7 +873,7 @@ function getCurrentUserRequest() {
         //     newTask.reqBody.mask = maskImagePreview.src
         // }
         if (maskSetting.checked) {
-            newTask.reqBody.mask = inpaintingEditor.getImg()
+            newTask.reqBody.mask = imageInpainter.getImg()
         }
         newTask.reqBody.sampler = 'ddim'
     } else {
@@ -879,8 +903,9 @@ function getPrompts(prompts) {
     prompts = prompts.map(prompt => prompt.trim())
     prompts = prompts.filter(prompt => prompt !== '')
 
-    if (activeTags.length > 0) {
-        const promptTags = activeTags.map(x => x.name).join(", ")
+    const newTags = activeTags.filter(tag => tag.inactive === undefined || tag.inactive === false)
+    if (newTags.length > 0) {
+        const promptTags = newTags.map(x => x.name).join(", ")
         prompts = prompts.map((prompt) => `${prompt}, ${promptTags}`)
     }
 
@@ -990,21 +1015,25 @@ async function stopAllTasks() {
     })
 }
 
-clearAllPreviewsBtn.addEventListener('click', async function() {
+function removeTask(taskToRemove) {
+    taskToRemove.remove()
+
+    if (document.querySelector('.imageTaskContainer') === null) {
+        previewTools.style.display = 'none'
+        initialText.style.display = 'block'
+    }
+}
+
+clearAllPreviewsBtn.addEventListener('click', (e) => { shiftOrConfirm(e, "Clear all the results and tasks in this window?", async function() {
     await stopAllTasks()
 
     let taskEntries = document.querySelectorAll('.imageTaskContainer')
-    taskEntries.forEach(task => {
-        task.remove()
-    })
+    taskEntries.forEach(removeTask)
+})})
 
-    previewTools.style.display = 'none'
-    initialText.style.display = 'block'
-})
-
-stopImageBtn.addEventListener('click', async function() {
+stopImageBtn.addEventListener('click', (e) => { shiftOrConfirm(e, "Stop all the tasks?", async function(e) {
     await stopAllTasks()
-})
+})})
 
 widthField.addEventListener('change', onDimensionChange)
 heightField.addEventListener('change', onDimensionChange)
@@ -1025,13 +1054,14 @@ numOutputsTotalField.addEventListener('change', renameMakeImageButton)
 numOutputsParallelField.addEventListener('change', renameMakeImageButton)
 
 function onDimensionChange() {
-    if (!maskSetting.checked) {
-        return
-    }
     let widthValue = parseInt(widthField.value)
     let heightValue = parseInt(heightField.value)
-
-    resizeInpaintingEditor(widthValue, heightValue)
+    if (!initImagePreviewContainer.classList.contains("has-image")) {
+        imageEditor.setImage(null, widthValue, heightValue)
+    }
+    else {
+        imageInpainter.setImage(initImagePreview.src, widthValue, heightValue)
+    }
 }
 
 diskPathField.disabled = !saveToDiskField.checked
@@ -1142,7 +1172,7 @@ async function getModels() {
 function checkRandomSeed() {
     if (randomSeedField.checked) {
         seedField.disabled = true
-        seedField.value = "0"
+        //seedField.value = "0" // This causes the seed to be lost if the user changes their mind after toggling the checkbox
     } else {
         seedField.disabled = false
     }
@@ -1152,10 +1182,6 @@ checkRandomSeed()
 
 function showInitImagePreview() {
     if (initImageSelector.files.length === 0) {
-        initImagePreviewContainer.style.display = 'none'
-        // inpaintingEditorContainer.style.display = 'none'
-        promptStrengthContainer.style.display = 'none'
-        // maskSetting.style.display = 'none'
         return
     }
 
@@ -1163,13 +1189,7 @@ function showInitImagePreview() {
     let file = initImageSelector.files[0]
 
     reader.addEventListener('load', function(event) {
-        // console.log(file.name, reader.result)
         initImagePreview.src = reader.result
-        initImagePreviewContainer.style.display = 'block'
-        inpaintingEditorContainer.style.display = 'none'
-        promptStrengthContainer.style.display = 'table-row'
-        samplerSelectionContainer.style.display = 'none'
-        // maskSetting.checked = false
     })
 
     if (file) {
@@ -1180,34 +1200,25 @@ initImageSelector.addEventListener('change', showInitImagePreview)
 showInitImagePreview()
 
 initImagePreview.addEventListener('load', function() {
-    inpaintingEditorCanvasBackground.style.backgroundImage = "url('" + this.src + "')"
-    // maskSetting.style.display = 'block'
-    // inpaintingEditorContainer.style.display = 'block'
+    promptStrengthContainer.style.display = 'table-row'
+    initImagePreviewContainer.classList.add("has-image")
+
     initImageSizeBox.textContent = initImagePreview.naturalWidth + " x " + initImagePreview.naturalHeight
-    initImageSizeBox.style.display = 'block'
+    imageEditor.setImage(this.src, initImagePreview.naturalWidth, initImagePreview.naturalHeight)
+    imageInpainter.setImage(this.src, parseInt(widthField.value), parseInt(heightField.value))
 })
 
 initImageClearBtn.addEventListener('click', function() {
     initImageSelector.value = null
-    // maskImageSelector.value = null
-
     initImagePreview.src = ''
-    // maskImagePreview.src = ''
     maskSetting.checked = false
 
-    initImagePreviewContainer.style.display = 'none'
-    // inpaintingEditorContainer.style.display = 'none'
-    // maskImagePreviewContainer.style.display = 'none'
-
-    // maskSetting.style.display = 'none'
-
     promptStrengthContainer.style.display = 'none'
-    samplerSelectionContainer.style.display = 'table-row'
-    initImageSizeBox.style.display = 'none'
+    initImagePreviewContainer.classList.remove("has-image")
+    imageEditor.setImage(null, parseInt(widthField.value), parseInt(heightField.value))
 })
 
 maskSetting.addEventListener('click', function() {
-    inpaintingEditorContainer.style.display = (this.checked ? 'block' : 'none')
     onDimensionChange()
 })
 
@@ -1247,9 +1258,22 @@ document.querySelectorAll('.popup').forEach(popup => {
     }
 })
 
-var tabElements = [];
+var tabElements = []
+function selectTab(tab_id) {
+    let tabInfo = tabElements.find(t => t.tab.id == tab_id)
+    if (!tabInfo.tab.classList.contains("active")) {
+        tabElements.forEach(info => {
+            if (info.tab.classList.contains("active")) {
+                info.tab.classList.toggle("active")
+                info.content.classList.toggle("active")
+            }
+        })
+        tabInfo.tab.classList.toggle("active")
+        tabInfo.content.classList.toggle("active")
+    }
+}
 function linkTabContents(tab) {
-    var name = tab.id.replace("tab-", "");
+    var name = tab.id.replace("tab-", "")
     var content = document.getElementById(`tab-content-${name}`)
     tabElements.push({
         name: name,
@@ -1257,18 +1281,7 @@ function linkTabContents(tab) {
         content: content
     })
 
-    tab.addEventListener("click", event => {
-        if (!tab.classList.contains("active")) {
-            tabElements.forEach(tabInfo => {
-                if (tabInfo.tab.classList.contains("active")) {
-                    tabInfo.tab.classList.toggle("active")
-                    tabInfo.content.classList.toggle("active")
-                }
-            })
-            tab.classList.toggle("active")
-            content.classList.toggle("active")
-        }
-    })
+    tab.addEventListener("click", event => selectTab(tab.id))
 }
 
 document.querySelectorAll(".tab").forEach(linkTabContents)
