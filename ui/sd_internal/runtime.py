@@ -461,7 +461,8 @@ def update_temp_img(req, x_samples, task_temp_images: list):
 # Build and return the apropriate generator for do_mk_img
 def get_image_progress_generator(req, data_queue: queue.Queue, task_temp_images: list, step_callback, extra_props=None):
     if not req.stream_progress_updates:
-        def empty_callback(x_samples, i): return x_samples
+        def empty_callback(x_samples, i):
+            step_callback()
         return empty_callback
 
     thread_data.partial_x_samples = None
