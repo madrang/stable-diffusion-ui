@@ -367,12 +367,12 @@ class ImageEditor {
 		if (type in touchmap) {
 			type = touchmap[type]
 			if (event.touches && event.touches[0]) {
-				var touch = event.touches[0]				
+				var touch = event.touches[0]
 				var x = (touch.clientX || 0) - bbox.left
 				var y = (touch.clientY || 0) - bbox.top
 			}
 		}
-	
+		event.preventDefault()
 		// do drawing-related stuff
 		if (type == "mousedown" || (type == "mouseenter" && event.buttons == 1)) {
 			if (this.dropper_active) {
