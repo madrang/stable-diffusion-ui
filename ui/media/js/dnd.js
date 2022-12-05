@@ -298,10 +298,7 @@ function restoreTaskToUI(task, fieldsToSkip) {
         // maskSetting.checked = false
         //inpaintingEditorContainer.style.display = maskSetting.checked ? 'block' : 'none'
     } else {
-        //initImagePreviewContainer.style.display = 'none'
-        // inpaintingEditorContainer.style.display = 'none'
-        promptStrengthContainer.style.display = 'none'
-        // maskSetting.style.display = 'none'
+        clearInitialImage()
     }
 }
 function readUI() {

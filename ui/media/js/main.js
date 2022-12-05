@@ -1209,7 +1209,7 @@ initImagePreview.addEventListener('load', function() {
     imageInpainter.setImage(this.src, parseInt(widthField.value), parseInt(heightField.value))
 })
 
-initImageClearBtn.addEventListener('click', function() {
+function clearInitialImage() {
     initImageSelector.value = null
     initImagePreview.src = ''
     maskSetting.checked = false
@@ -1217,6 +1217,10 @@ initImageClearBtn.addEventListener('click', function() {
     promptStrengthContainer.style.display = 'none'
     initImagePreviewContainer.classList.remove("has-image")
     imageEditor.setImage(null, parseInt(widthField.value), parseInt(heightField.value))
+}
+
+initImageClearBtn.addEventListener('click', function() {
+    clearInitialImage()
 })
 
 maskSetting.addEventListener('click', function() {
