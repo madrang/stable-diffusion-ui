@@ -131,7 +131,7 @@ const TASK_MAPPING = {
             imageInpainter.setImage(mask)
             maskSetting.checked = Boolean(mask)
         },
-        readUI: () => (maskSetting.checked ? inpaintingEditor.getImg() : undefined),
+        readUI: () => (maskSetting.checked ? imageInpainter.getImg() : undefined),
         parse: (val) => val
     },
 
@@ -290,15 +290,15 @@ function restoreTaskToUI(task, fieldsToSkip) {
     // Show the source picture if present
     initImagePreview.src = (task.reqBody.init_image == undefined ? '' : task.reqBody.init_image)
     if (IMAGE_REGEX.test(initImagePreview.src)) {
-        Boolean(task.reqBody.mask) ? inpaintingEditor.setImg(task.reqBody.mask) : inpaintingEditor.resetBackground()
+        Boolean(task.reqBody.mask) ? imageInpainter.setImg(task.reqBody.mask) : imageInpainter.resetBackground()
         initImagePreviewContainer.style.display = 'block'
-        inpaintingEditorContainer.style.display = 'none'
+        //inpaintingEditorContainer.style.display = 'none'
         promptStrengthContainer.style.display = 'table-row'
         //samplerSelectionContainer.style.display = 'none'
         // maskSetting.checked = false
-        inpaintingEditorContainer.style.display = maskSetting.checked ? 'block' : 'none'
+        //inpaintingEditorContainer.style.display = maskSetting.checked ? 'block' : 'none'
     } else {
-        initImagePreviewContainer.style.display = 'none'
+        //initImagePreviewContainer.style.display = 'none'
         // inpaintingEditorContainer.style.display = 'none'
         promptStrengthContainer.style.display = 'none'
         // maskSetting.style.display = 'none'

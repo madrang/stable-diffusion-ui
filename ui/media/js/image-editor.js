@@ -263,7 +263,7 @@ class ImageEditor {
 
         this.container.style.width = width + "px"
         this.container.style.height = height + "px"
-        
+
         Object.values(this.layers).forEach(layer => {
             layer.canvas.width = width
             layer.canvas.height = height
