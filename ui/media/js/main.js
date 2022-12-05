@@ -344,6 +344,8 @@ function onUseAsInputClick(req, img) {
 
     maskSetting.checked = false
     imageInpainter.setImage(null)
+
+    promptStrengthContainer.style.display = 'table-row'
 }
 
 function onDownloadImageClick(req, img) {
@@ -1067,11 +1069,10 @@ numOutputsParallelField.addEventListener('change', renameMakeImageButton)
 function onDimensionChange() {
     let widthValue = parseInt(widthField.value)
     let heightValue = parseInt(heightField.value)
-    if (!initImagePreviewContainer.classList.contains("has-image")) {
-        imageEditor.setImage(null, widthValue, heightValue)
-    }
-    else {
+    if (initImagePreviewContainer.classList.contains("has-image")) {
         imageInpainter.setImage(initImagePreview.src, widthValue, heightValue)
+    } else {
+        imageEditor.setImage(null, widthValue, heightValue)
     }
 }
 
@@ -1193,6 +1194,7 @@ checkRandomSeed()
 
 function showInitImagePreview() {
     if (initImageSelector.files.length === 0) {
+        promptStrengthContainer.style.display = 'none'
         return
     }
 
