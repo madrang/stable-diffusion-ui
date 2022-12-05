@@ -290,7 +290,11 @@ function restoreTaskToUI(task, fieldsToSkip) {
     // Show the source picture if present
     initImagePreview.src = (task.reqBody.init_image == undefined ? '' : task.reqBody.init_image)
     if (IMAGE_REGEX.test(initImagePreview.src)) {
-        Boolean(task.reqBody.mask) ? imageInpainter.setImg(task.reqBody.mask) : imageInpainter.resetBackground()
+        if (task.reqBody.mask) {
+            imageInpainter.setImg(task.reqBody.mask)
+        } else {
+            imageInpainter.setImg(null)
+        }
         initImagePreviewContainer.style.display = 'block'
         //inpaintingEditorContainer.style.display = 'none'
         promptStrengthContainer.style.display = 'table-row'
