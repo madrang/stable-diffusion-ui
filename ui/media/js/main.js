@@ -212,7 +212,7 @@ function logError(msg, res, outputMsg) {
 function playSound() {
     const audio = new Audio('/media/ding.mp3')
     audio.volume = 0.2
-    var promise = audio.play()
+    const promise = audio.play()
     if (promise !== undefined) {
         promise.then(_ => {}).catch(error => {
             console.warn("browser blocked autoplay")
@@ -341,8 +341,10 @@ function onUseAsInputClick(req, img) {
 
     initImageSelector.value = null
     initImagePreview.src = imgData
+    imageEditor.setImage(imgData)
 
     maskSetting.checked = false
+    imageInpainter.setImage(null)
 }
 
 function onDownloadImageClick(req, img) {
@@ -1250,7 +1252,7 @@ document.querySelectorAll('.popup').forEach(popup => {
             popup.classList.remove("active")
         }
     })
-    var closeButton = popup.querySelector(".close-button")
+    const closeButton = popup.querySelector(".close-button")
     if (closeButton) {
         closeButton.addEventListener('click', () => {
             popup.classList.remove("active")
@@ -1258,7 +1260,7 @@ document.querySelectorAll('.popup').forEach(popup => {
     }
 })
 
-var tabElements = []
+const tabElements = []
 function selectTab(tab_id) {
     let tabInfo = tabElements.find(t => t.tab.id == tab_id)
     if (!tabInfo.tab.classList.contains("active")) {
@@ -1273,8 +1275,8 @@ function selectTab(tab_id) {
     }
 }
 function linkTabContents(tab) {
-    var name = tab.id.replace("tab-", "")
-    var content = document.getElementById(`tab-content-${name}`)
+    const name = tab.id.replace("tab-", "")
+    const content = document.getElementById(`tab-content-${name}`)
     tabElements.push({
         name: name,
         tab: tab,

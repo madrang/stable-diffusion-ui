@@ -128,7 +128,7 @@ const TASK_MAPPING = {
     },
     mask:  { name: 'Mask',
         setUI: (mask) => {
-            inpaintingEditor.setImg(mask)
+            imageInpainter.setImage(mask)
             maskSetting.checked = Boolean(mask)
         },
         readUI: () => (maskSetting.checked ? inpaintingEditor.getImg() : undefined),
