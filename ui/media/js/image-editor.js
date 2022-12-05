@@ -80,8 +80,7 @@ const IMAGE_EDITOR_SECTIONS = [
                 const span = document.createElement("span")
                 span.textContent = "Custom"
                 element.appendChild(span)
-            }
-            else {
+            } else {
                 element.style.background = option
             }
         },
@@ -252,8 +251,7 @@ class ImageEditor {
             const multiplier = max_size / width
             width = (multiplier * width).toFixed()
             height = (multiplier * height).toFixed()
-        }
-        else {
+        } else {
             const multiplier = max_size / height
             width = (multiplier * width).toFixed()
             height = (multiplier * height).toFixed()
@@ -293,8 +291,7 @@ class ImageEditor {
                 this.layers.background.ctx.drawImage(image, 0, 0, this.width, this.height)
             }
             image.src = url
-        }
-        else {
+        } else {
             this.layers.background.ctx.fillStyle = "#ffffff"
             this.layers.background.ctx.beginPath()
             this.layers.background.ctx.rect(0, 0, this.width, this.height)
@@ -307,13 +304,14 @@ class ImageEditor {
             this.layers.background.ctx.drawImage(this.layers.drawing.canvas, 0, 0, this.width, this.height)
             const base64 = this.layers.background.canvas.toDataURL()
             initImagePreview.src = base64 // this will trigger the rest of the app to use it
-        }
-        else {
+        } else {
             // This is an inpainter, so make sure the toggle is set accordingly
             const is_blank = !this.layers.drawing.ctx
                 .getImageData(0, 0, this.width, this.height).data
                 .some(channel => channel !== 0)
-            maskSetting.checked = !is_blank
+            if (typeof maskSetting === "object") {
+                maskSetting.checked = !is_blank
+            }
         }
         this.close()
     }
@@ -340,8 +338,7 @@ class ImageEditor {
             layer.ctx.filter = sharpness == 0 ? `none` : `blur(${sharpness}px)`
             layer.ctx.globalAlpha = (1 - this.getOptionValue("opacity"))
             layer.ctx.globalCompositeOperation = this.eraser_active ? "destination-out" : "source-over"
-        }
-        else {
+        } else {
             Object.values([ "drawing", "overlay" ]).map(name => this.layers[name]).forEach(l => {
                 this.setBrush(l)
             })
@@ -389,8 +386,7 @@ class ImageEditor {
                 })
                 this.custom_color_input.value = tempColor
                 this.custom_color_input.dispatchEvent(new Event("change"))
-            }
-            else {
+            } else {
                 this.drawing = true
                 this.ctx_overlay.beginPath()
                 this.ctx_overlay.moveTo(x, y)
