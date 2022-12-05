@@ -433,8 +433,8 @@ def mk_img(req: Request, data_queue: queue.Queue, task_temp_images: list, step_c
         return do_mk_img(req, data_queue, task_temp_images, step_callback)
     except Exception as e:
         print(traceback.format_exc())
-        if isinstance(e, RuntimeError) and 'out of memory' in str(e):
-            if thread_data.device != 'cpu' and not thread_data.test_sd2:
+        if isinstance(e, RuntimeError) and 'out of memory' in str(e) and not thread_data.test_sd2:
+            if thread_data.device != 'cpu':
                 thread_data.modelFS.to('cpu')
                 thread_data.modelCS.to('cpu')
                 thread_data.model.model1.to("cpu")
