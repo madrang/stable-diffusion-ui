@@ -1148,7 +1148,7 @@
                 task_queue.delete(task)
                 continue
             }
-            if (task.isCompleted || task.isStopped) {
+            if (task.isCompleted || task.isStopped || cTsk) {
                 const eventEndArgs = {task, generator}
                 if (task.isStopped) {
                     eventEndArgs.stopped = true
