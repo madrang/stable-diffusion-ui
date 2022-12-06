@@ -128,7 +128,10 @@ const TASK_MAPPING = {
     },
     mask:  { name: 'Mask',
         setUI: (mask) => {
-            imageInpainter.setImage(mask)
+            // add a delay to insure this happens AFTER the main image loads (which reloads the inpainter)
+            setTimeout(() => { //FIXME Remove the need for this delay!
+                imageInpainter.setImg(mask)
+            }, 250)
             maskSetting.checked = Boolean(mask)
         },
         readUI: () => (maskSetting.checked ? imageInpainter.getImg() : undefined),
@@ -291,13 +294,16 @@ function restoreTaskToUI(task, fieldsToSkip) {
     initImagePreview.src = (task.reqBody.init_image == undefined ? '' : task.reqBody.init_image)
     if (IMAGE_REGEX.test(initImagePreview.src)) {
         if (task.reqBody.mask) {
-            imageInpainter.setImg(task.reqBody.mask)
+            // add a delay to insure this happens AFTER the main image loads (which reloads the inpainter)
+            setTimeout(() => { //FIXME Remove the need for this delay!
+                imageInpainter.setImg(task.reqBody.mask)
+            }, 250)
         } else {
             imageInpainter.setImg(null)
         }
         initImagePreviewContainer.style.display = 'block'
-        //inpaintingEditorContainer.style.display = 'none'
         promptStrengthContainer.style.display = 'table-row'
+        //inpaintingEditorContainer.style.display = 'none'
         //samplerSelectionContainer.style.display = 'none'
         // maskSetting.checked = false
         //inpaintingEditorContainer.style.display = maskSetting.checked ? 'block' : 'none'
